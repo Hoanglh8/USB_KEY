@@ -1,0 +1,14 @@
+@import 'abstracts/variables', 'abstracts/mixins', 'abstracts/placeholder';
+
+@import 'themes/theme';
+
+@import 'base/reset', 'base/typography';
+
+@import 'components/confirm-modal', 'components/collapse-detail', 'components/document-detail-modal',
+  'components/file-component', 'components/pdf-viewer', 'components/image-video-viewer', 'components/management-company',
+  'components/create-multiple';
+
+@import 'layouts/app-layout', 'layouts/detail-page-layout';
+
+@import 'pages/login-page', 'pages/move-document', 'pages/borrow_document_detail', 'pages/document_mining_wait',
+  'pages/digital-storage-inventory-status', 'pages/dashboard';
