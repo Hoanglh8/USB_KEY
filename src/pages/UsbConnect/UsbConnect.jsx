@@ -1,7 +1,9 @@
 import { useRef, useEffect } from 'react';
+import { notification } from 'antd';
+import { sharedKey } from 'curve25519-js';
 
 const serial = {};
-
+const Buffer = require('buffer/').Buffer;
 serial.getPorts = function () {
   return navigator.usb.getDevices().then((devices) => {
     return devices.map((device) => new serial.Port(device));
@@ -196,11 +198,42 @@ const UsbConnect = () => {
       }
     }
 
-    port.send(
-      new TextEncoder().encode(
-        String.fromCharCode(event.which || event.keyCode)
-      )
-    );
+    // Key nhận về từ USB
+    const ALICE_PRIV =
+      '77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a';
+    const BOB_PUB =
+      'de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f';
+
+    const alicePriv = Uint8Array.from(Buffer.from(ALICE_PRIV, 'hex'));
+
+    const bobPub = Uint8Array.from(Buffer.from(BOB_PUB, 'hex'));
+
+    const secret = sharedKey(alicePriv, bobPub);
+    // Key gen ra bằng thư viện
+    const key = Buffer.from(secret).toString('hex');
+
+    // Khởi tạo encode
+    const enc = new TextEncoder(); // always utf-8
+    // Gửi key về cho USB
+    if (port) {
+      port?.send(enc.encode('Hello')).catch((e) => {
+        console.log(e);
+      });
+    } else {
+      openNotification();
+    }
+  };
+
+  // Thông báo nếu chưa có connect
+  const openNotification = () => {
+    notification.open({
+      message: 'Thông báo',
+      description:
+        'Bạn chưa kết nối đến USB, Vui lòng kết nối với USB trước khi gửi tin.',
+      onClick: () => {
+        console.log('Notification Clicked!');
+      },
+    });
   };
 
   useEffect(() => {
