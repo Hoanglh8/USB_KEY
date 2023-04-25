@@ -1,7 +1,7 @@
 import { useRef, useEffect } from 'react';
 import { notification } from 'antd';
 import { sharedKey } from 'curve25519-js';
-
+import { generateKeyPair } from 'curve25519-js';
 const serial = {};
 const Buffer = require('buffer/').Buffer;
 serial.getPorts = function () {
@@ -9,6 +9,23 @@ serial.getPorts = function () {
     return devices.map((device) => new serial.Port(device));
   });
 };
+
+// TODO: chỗ randomBytes ông gọi hàm random nhé
+var randomBytes = Uint8Array.from(
+  Buffer.from(
+    '77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a',
+    'hex'
+  )
+);
+
+const keyPair = generateKeyPair(randomBytes);
+const ALICE_PRIV = Buffer.from(keyPair.private).toString('hex');
+const ALICE_PUB = Buffer.from(keyPair.public).toString('hex');
+
+var BOB_PUB = null;
+
+var handshakeState = 0;
+var finalSharedKey = null; // TODO: đây chính là key để mã hóa aes128
 
 serial.requestPort = function () {
   const filters = [
@@ -144,8 +161,47 @@ const UsbConnect = () => {
         }
 
         port.onReceive = (data) => {
+          const enc = new TextEncoder(); // always utf-8
           const textDecoder = new TextDecoder();
-          console.log(textDecoder.decode(data));
+          var rx = textDecoder.decode(data);
+          console.log(rx);
+
+          // TODO: chỗ này là do phần physic cho truyền tối đa 64 bytes 1 lần
+          // Độ dài key > 64 -> truyền làm 2 lần
+
+          if (rx.includes('Hi,key=')) {
+            rx = rx.replace('Hi,key=', '');
+            BOB_PUB = rx;
+            handshakeState = 1;
+          } else if (handshakeState === 1) {
+            handshakeState = 2;
+            BOB_PUB += rx;
+            console.log('[0] BOB_PUB key : ' + BOB_PUB);
+
+            const alicePriv = Uint8Array.from(Buffer.from(ALICE_PRIV, 'hex'));
+            const bobPub = Uint8Array.from(Buffer.from(BOB_PUB, 'hex'));
+
+            // console.log('[1] BOB_PUB key : ' + bobPub);
+            // console.log('Alice private : ' + alicePriv);
+
+            var finalSharedStr = Buffer.from(
+              sharedKey(alicePriv, bobPub)
+            ).toString('hex');
+            finalSharedKey = Uint8Array.from(
+              Buffer.from(finalSharedStr, 'hex')
+            );
+
+            // console.log('Final shared [str]: ' + finalSharedStr);
+            // console.log('Final shared [raw]: ' + finalSharedKey);
+
+            var replyToUsb = 'key=' + ALICE_PUB;
+            console.log('Reply to usb : ' + replyToUsb);
+
+            port?.send(enc.encode(replyToUsb)).catch((e) => {
+              console.log(e);
+            });
+          }
+
           if (data.getInt8() === 13) {
             currentReceiverLine = null;
           } else {
@@ -191,36 +247,23 @@ const UsbConnect = () => {
   };
 
   const handleKeyUp = (event) => {
+    const enc = new TextEncoder(); // always utf-8
+
+    // console.log(event.keyCode);
     if (event.keyCode === 13) {
       if (commandLineRef.current && commandLineRef.current.value.length > 0) {
         addLine('sender_lines', commandLineRef.current.value);
         commandLineRef.current.value = '';
       }
-    }
-
-    // Key nhận về từ USB
-    const ALICE_PRIV =
-      '77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a';
-    const BOB_PUB =
-      'de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f';
-
-    const alicePriv = Uint8Array.from(Buffer.from(ALICE_PRIV, 'hex'));
-
-    const bobPub = Uint8Array.from(Buffer.from(BOB_PUB, 'hex'));
-
-    const secret = sharedKey(alicePriv, bobPub);
-    // Key gen ra bằng thư viện
-    const key = Buffer.from(secret).toString('hex');
-
-    // Khởi tạo encode
-    const enc = new TextEncoder(); // always utf-8
-    // Gửi key về cho USB
-    if (port) {
-      port?.send(enc.encode('Hello')).catch((e) => {
-        console.log(e);
-      });
-    } else {
-      openNotification();
+    } else if (event.keyCode === 221) {
+      // ]
+      if (port) {
+        port?.send(enc.encode('Hello')).catch((e) => {
+          console.log(e);
+        });
+      } else {
+        openNotification();
+      }
     }
   };
 
