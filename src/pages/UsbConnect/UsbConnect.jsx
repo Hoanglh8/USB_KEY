@@ -1,31 +1,19 @@
-import { useRef, useEffect } from 'react';
 import { notification } from 'antd';
-import { sharedKey } from 'curve25519-js';
 import { generateKeyPair } from 'curve25519-js';
+import { useEffect, useRef, useState } from 'react';
 const serial = {};
 const Buffer = require('buffer/').Buffer;
+
 serial.getPorts = function () {
   return navigator.usb.getDevices().then((devices) => {
     return devices.map((device) => new serial.Port(device));
   });
 };
 
-// TODO: chỗ randomBytes ông gọi hàm random nhé
-var randomBytes = Uint8Array.from(
-  Buffer.from(
-    '77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a',
-    'hex'
-  )
-);
+let BOB_PUB = null;
 
-const keyPair = generateKeyPair(randomBytes);
-const ALICE_PRIV = Buffer.from(keyPair.private).toString('hex');
-const ALICE_PUB = Buffer.from(keyPair.public).toString('hex');
-
-var BOB_PUB = null;
-
-var handshakeState = 0;
-var finalSharedKey = null; // TODO: đây chính là key để mã hóa aes128
+let handshakeState = 0;
+let finalSharedKey = null; // TODO: đây chính là key để mã hóa aes128
 
 serial.requestPort = function () {
   const filters = [
@@ -69,7 +57,7 @@ serial.Port.prototype.connect = function () {
       }
     })
     .then(() => {
-      var interfaces = this.device_.configuration.interfaces;
+      const interfaces = this.device_.configuration.interfaces;
       interfaces.forEach((element) => {
         element.alternates.forEach((elementalt) => {
           if (elementalt.interfaceClass === 0xff) {
@@ -123,6 +111,9 @@ const UsbConnect = () => {
   const statusRef = useRef(null);
   const commandLineRef = useRef(null);
 
+  const [alicePrivVal, setAlicePrivVal] = useState(null);
+  const [alicePubVal, setAlicePubVal] = useState(null);
+
   const addLine = (linesId, text) => {
     const senderLine = document.createElement('div');
     senderLine.className = 'line';
@@ -163,7 +154,7 @@ const UsbConnect = () => {
         port.onReceive = (data) => {
           const enc = new TextEncoder(); // always utf-8
           const textDecoder = new TextDecoder();
-          var rx = textDecoder.decode(data);
+          let rx = textDecoder.decode(data);
           console.log(rx);
 
           // TODO: chỗ này là do phần physic cho truyền tối đa 64 bytes 1 lần
@@ -178,14 +169,14 @@ const UsbConnect = () => {
             BOB_PUB += rx;
             console.log('[0] BOB_PUB key : ' + BOB_PUB);
 
-            const alicePriv = Uint8Array.from(Buffer.from(ALICE_PRIV, 'hex'));
+            const alicePriv = Uint8Array.from(Buffer.from(alicePrivVal, 'hex'));
             const bobPub = Uint8Array.from(Buffer.from(BOB_PUB, 'hex'));
 
             // console.log('[1] BOB_PUB key : ' + bobPub);
             // console.log('Alice private : ' + alicePriv);
 
-            var finalSharedStr = Buffer.from(
-              sharedKey(alicePriv, bobPub)
+            const finalSharedStr = Buffer.from(
+              generateKeyPair(alicePriv, bobPub)
             ).toString('hex');
             finalSharedKey = Uint8Array.from(
               Buffer.from(finalSharedStr, 'hex')
@@ -194,7 +185,7 @@ const UsbConnect = () => {
             // console.log('Final shared [str]: ' + finalSharedStr);
             // console.log('Final shared [raw]: ' + finalSharedKey);
 
-            var replyToUsb = 'key=' + ALICE_PUB;
+            const replyToUsb = 'key=' + alicePubVal;
             console.log('Reply to usb : ' + replyToUsb);
 
             port?.send(enc.encode(replyToUsb)).catch((e) => {
@@ -279,7 +270,28 @@ const UsbConnect = () => {
     });
   };
 
+  function generateRandomBytes(length) {
+    let result = '';
+    const hexChars = '0123456789abcdef';
+    for (let i = 0; i < length * 2; i++) {
+      result += hexChars[Math.floor(Math.random() * hexChars.length)];
+    }
+    return result;
+  }
+
   useEffect(() => {
+    // Ramdom 32 byte
+    const random = generateRandomBytes(32);
+    var randomBytes = Uint8Array.from(Buffer.from(random, 'hex'));
+
+    const keyPair = generateKeyPair(randomBytes);
+    const ALICE_PRIV = Buffer.from(keyPair.private).toString('hex');
+    const ALICE_PUB = Buffer.from(keyPair.public).toString('hex');
+    setAlicePrivVal(ALICE_PRIV);
+    setAlicePubVal(ALICE_PUB);
+    console.log(ALICE_PRIV);
+    console.log(ALICE_PUB);
+
     serial.getPorts().then((ports) => {
       if (ports.length === 0) {
         statusRef.current.textContent = 'No device found.';
