@@ -1,5 +1,5 @@
 import { notification } from 'antd';
-import { generateKeyPair } from 'curve25519-js';
+import { generateKeyPair, sharedKey } from 'curve25519-js';
 import { useEffect, useRef, useState } from 'react';
 const serial = {};
 const Buffer = require('buffer/').Buffer;
@@ -155,7 +155,6 @@ const UsbConnect = () => {
           const enc = new TextEncoder(); // always utf-8
           const textDecoder = new TextDecoder();
           let rx = textDecoder.decode(data);
-          console.log(rx);
 
           // TODO: chỗ này là do phần physic cho truyền tối đa 64 bytes 1 lần
           // Độ dài key > 64 -> truyền làm 2 lần
@@ -167,23 +166,16 @@ const UsbConnect = () => {
           } else if (handshakeState === 1) {
             handshakeState = 2;
             BOB_PUB += rx;
-            console.log('[0] BOB_PUB key : ' + BOB_PUB);
 
             const alicePriv = Uint8Array.from(Buffer.from(alicePrivVal, 'hex'));
             const bobPub = Uint8Array.from(Buffer.from(BOB_PUB, 'hex'));
 
-            // console.log('[1] BOB_PUB key : ' + bobPub);
-            // console.log('Alice private : ' + alicePriv);
-
             const finalSharedStr = Buffer.from(
-              generateKeyPair(alicePriv, bobPub)
+              sharedKey(alicePriv, bobPub)
             ).toString('hex');
             finalSharedKey = Uint8Array.from(
               Buffer.from(finalSharedStr, 'hex')
             );
-
-            // console.log('Final shared [str]: ' + finalSharedStr);
-            // console.log('Final shared [raw]: ' + finalSharedKey);
 
             const replyToUsb = 'key=' + alicePubVal;
             console.log('Reply to usb : ' + replyToUsb);
@@ -240,7 +232,6 @@ const UsbConnect = () => {
   const handleKeyUp = (event) => {
     const enc = new TextEncoder(); // always utf-8
 
-    // console.log(event.keyCode);
     if (event.keyCode === 13) {
       if (commandLineRef.current && commandLineRef.current.value.length > 0) {
         addLine('sender_lines', commandLineRef.current.value);
@@ -289,8 +280,6 @@ const UsbConnect = () => {
     const ALICE_PUB = Buffer.from(keyPair.public).toString('hex');
     setAlicePrivVal(ALICE_PRIV);
     setAlicePubVal(ALICE_PUB);
-    console.log(ALICE_PRIV);
-    console.log(ALICE_PUB);
 
     serial.getPorts().then((ports) => {
       if (ports.length === 0) {
