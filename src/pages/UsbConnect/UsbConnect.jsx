@@ -114,6 +114,9 @@ const UsbConnect = () => {
   const [alicePrivVal, setAlicePrivVal] = useState(null);
   const [alicePubVal, setAlicePubVal] = useState(null);
 
+  const [pingPong, setPingPong] = useState(0);
+  const [pha2Val, setPha2Val] = useState(false);
+
   const addLine = (linesId, text) => {
     const senderLine = document.createElement('div');
     senderLine.className = 'line';
@@ -173,16 +176,22 @@ const UsbConnect = () => {
             const finalSharedStr = Buffer.from(
               sharedKey(alicePriv, bobPub)
             ).toString('hex');
+            // Final key
             finalSharedKey = Uint8Array.from(
               Buffer.from(finalSharedStr, 'hex')
             );
 
             const replyToUsb = 'key=' + alicePubVal;
-            console.log('Reply to usb : ' + replyToUsb);
+            // console.log('Reply to usb : ' + replyToUsb);
 
-            port?.send(enc.encode(replyToUsb)).catch((e) => {
-              console.log(e);
-            });
+            port
+              ?.send(enc.encode(replyToUsb))
+              .then((_) => {
+                setPha2Val(true);
+              })
+              .catch((e) => {
+                console.log(e);
+              });
           }
 
           if (data.getInt8() === 13) {
@@ -292,6 +301,20 @@ const UsbConnect = () => {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (pha2Val) {
+      setTimeout(() => {
+        const sandId = Math.floor(1000 + Math.random() * 9000);
+        const encodedString = new Buffer(sandId.toString()).toString('base64');
+        const enc = new TextEncoder(); // always utf-8
+        setPingPong(pingPong + 1);
+        port?.send(enc.encode(encodedString)).catch((e) => {
+          console.log(e);
+        });
+      }, 1000);
+    }
+  }, [pingPong, pha2Val]);
 
   return (
     <div className="main-content">
