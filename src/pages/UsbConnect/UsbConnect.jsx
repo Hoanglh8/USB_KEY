@@ -1,6 +1,7 @@
 import { notification } from 'antd';
 import { generateKeyPair, sharedKey } from 'curve25519-js';
 import { useEffect, useRef, useState } from 'react';
+import { AES, enc } from 'crypto-js';
 const serial = {};
 const Buffer = require('buffer/').Buffer;
 
@@ -110,6 +111,8 @@ const UsbConnect = () => {
   const connectButtonRef = useRef(null);
   const statusRef = useRef(null);
   const commandLineRef = useRef(null);
+
+  const [portConnect, setPortConnect] = useState(null);
 
   const [alicePrivVal, setAlicePrivVal] = useState(null);
   const [alicePubVal, setAlicePubVal] = useState(null);
@@ -297,6 +300,7 @@ const UsbConnect = () => {
         statusRef.current.textContent = 'Connecting...';
         // eslint-disable-next-line react-hooks/exhaustive-deps
         port = ports[0];
+        setPortConnect(ports[0]);
         connect();
       }
     });
@@ -307,11 +311,27 @@ const UsbConnect = () => {
       setTimeout(() => {
         const sandId = Math.floor(1000 + Math.random() * 9000);
         const encodedString = new Buffer(sandId.toString()).toString('base64');
-        const enc = new TextEncoder(); // always utf-8
+        const cipherTextHex = enc.Hex.stringify(enc.Utf8.parse(encodedString));
+        console.log(cipherTextHex);
+        const encForUsb = new TextEncoder(); // always utf-8
         setPingPong(pingPong + 1);
-        port?.send(enc.encode(encodedString)).catch((e) => {
-          console.log(e);
-        });
+        if (portConnect) {
+          portConnect?.send(encForUsb.encode(cipherTextHex)).catch((e) => {
+            console.log(e);
+          });
+        } else {
+          serial.getPorts().then((ports) => {
+            if (ports.length === 0) {
+              statusRef.current.textContent = 'No device found.';
+            } else {
+              statusRef.current.textContent = 'Connecting...';
+              // eslint-disable-next-line react-hooks/exhaustive-deps
+              port = ports[0];
+              setPortConnect(ports[0]);
+              connect();
+            }
+          });
+        }
       }, 1000);
     }
   }, [pingPong, pha2Val]);
