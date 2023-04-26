@@ -251,7 +251,9 @@ const UsbConnect = () => {
       }
     } else if (event.keyCode === 221) {
       // ]
+
       if (port) {
+        setPortConnect(port);
         port?.send(enc.encode('Hello')).catch((e) => {
           console.log(e);
         });
@@ -300,7 +302,6 @@ const UsbConnect = () => {
         statusRef.current.textContent = 'Connecting...';
         // eslint-disable-next-line react-hooks/exhaustive-deps
         port = ports[0];
-        setPortConnect(ports[0]);
         connect();
       }
     });
@@ -327,7 +328,6 @@ const UsbConnect = () => {
               statusRef.current.textContent = 'Connecting...';
               // eslint-disable-next-line react-hooks/exhaustive-deps
               port = ports[0];
-              setPortConnect(ports[0]);
               connect();
             }
           });
