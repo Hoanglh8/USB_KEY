@@ -29,7 +29,6 @@ const restartHandshakeStateMachine = () => {
 export const encryptedUsbPayload = (data) => {
   if (finalSharedKeyStr) {
     let tmpKey = finalSharedKeyStr.slice(0, 16);
-    console.log('Share key: ' + tmpKey);
     var encryptedData = CryptoJS.AES.encrypt(
       CryptoJS.enc.Utf8.parse(data),
       CryptoJS.enc.Utf8.parse(tmpKey),
@@ -53,11 +52,8 @@ export const encryptedUsbPayload = (data) => {
 export const decryptedUsbPayload = (data) => {
   if (finalSharedKeyStr) {
     let tmpKey = finalSharedKeyStr.slice(0, 16);
-    console.log(
-      'Share key: ' + tmpKey + ', data = ' + data + ', IV: ' + aesIVindex
-    );
+
     var encryptedText = CryptoJS.enc.Base64.parse(data);
-    console.log('Hex string data: ' + encryptedText);
 
     var decryptedTmp = CryptoJS.AES.decrypt(
       data,
@@ -70,10 +66,8 @@ export const decryptedUsbPayload = (data) => {
       }
     ).toString();
 
-    console.log('raw : ' + decryptedTmp);
     var uint8array = Uint8Array.from(Buffer.from(decryptedTmp, 'hex'));
     var finalData = new TextDecoder().decode(uint8array);
-    console.log('Final : ' + finalData);
 
     deviceSerial = finalData.split(',')[0];
     var rxSandId = finalData.split(',')[1];
@@ -81,10 +75,6 @@ export const decryptedUsbPayload = (data) => {
     isUsbAuthenticated = rxSandId.localeCompare(lastRememberSandId.toString())
       ? false
       : true;
-    console.log(rxSandId);
-
-    console.log('Serial : ' + deviceSerial);
-    console.log('Sand id is valid : ' + isUsbAuthenticated);
 
     // TODO: sau khi đã kiểm tra xong valid usb & mac -> thì 3-5s sau cần thay đổi sand ID và gửi lại
     // TODO : web test các case disconnect USB (rút ra cắm lại)
@@ -260,7 +250,6 @@ const UsbConnect = () => {
             ).toString('hex');
 
             const replyToUsb = 'key=' + alicePubVal;
-            // console.log('Reply to usb : ' + replyToUsb);
 
             port
               ?.send(enc1.encode(replyToUsb))
@@ -269,7 +258,6 @@ const UsbConnect = () => {
               })
               .catch((e) => {
                 restartHandshakeStateMachine(); // Bat tay lai tu dau
-                console.log(e);
               });
           } else if (handshakeState === 2) {
             // HuyTV 2 = state da authen qua pha1
@@ -277,7 +265,6 @@ const UsbConnect = () => {
               // Remove header and footer
               rx = rx.substring(1, rx.length - 1);
               rx = decryptedUsbPayload(rx);
-              console.log('Decrypted ' + rx);
             }
           }
 
@@ -340,7 +327,7 @@ const UsbConnect = () => {
         setPortConnect(port);
         var hello = 'Hello,iv=' + aesIVindex;
         port?.send(enc.encode(hello)).catch((e) => {
-          console.log(e);
+          // console.log(e);
         });
       } else {
         openNotification();
@@ -355,7 +342,7 @@ const UsbConnect = () => {
       description:
         'Bạn chưa kết nối đến USB, Vui lòng kết nối với USB trước khi gửi tin.',
       onClick: () => {
-        console.log('Notification Clicked!');
+        // console.log('Notification Clicked!');
       },
     });
   };
@@ -396,9 +383,6 @@ const UsbConnect = () => {
     if (pha2Val) {
       setTimeout(() => {
         const sandId = Math.floor(1000 + Math.random() * 9000);
-        // const encodedString = new Buffer(sandId.toString()).toString('base64');
-        // const cipherTextHex = enc.Hex.stringify(enc.Utf8.parse(encodedString));
-        // console.log(cipherTextHex);
         //HuyTV
         lastRememberSandId = sandId;
         var sandMsg =
@@ -406,14 +390,12 @@ const UsbConnect = () => {
           ',' +
           Math.floor(1000 + Math.random() * 9000).toString();
         var payload = encryptedUsbPayload(sandMsg);
-        console.log(payload);
 
         const encForUsb = new TextEncoder(); // always utf-8
-        // setPingPong(pingPong + 1);
+        setPingPong(pingPong + 1);
         if (portConnect) {
           portConnect?.send(encForUsb.encode(payload)).catch((e) => {
             restartHandshakeStateMachine();
-            console.log(e);
           });
         } else {
           serial.getPorts().then((ports) => {
