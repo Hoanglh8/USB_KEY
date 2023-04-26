@@ -28,7 +28,7 @@ const restartHandshakeStateMachine = () => {
 
 export const encryptedUsbPayload = (data) => {
   if (finalSharedKeyStr) {
-    let tmpKey = finalSharedKeyStr.slice(0, 16);
+    let tmpKey = finalSharedKeyStr.slice(0, 32);
     var encryptedData = CryptoJS.AES.encrypt(
       CryptoJS.enc.Utf8.parse(data),
       CryptoJS.enc.Utf8.parse(tmpKey),
@@ -51,7 +51,7 @@ export const encryptedUsbPayload = (data) => {
 
 export const decryptedUsbPayload = (data) => {
   if (finalSharedKeyStr) {
-    let tmpKey = finalSharedKeyStr.slice(0, 16);
+    let tmpKey = finalSharedKeyStr.slice(0, 32);
 
     var encryptedText = CryptoJS.enc.Base64.parse(data);
 
@@ -396,6 +396,7 @@ const UsbConnect = () => {
         if (portConnect) {
           portConnect?.send(encForUsb.encode(payload)).catch((e) => {
             restartHandshakeStateMachine();
+            setPortConnect(null);
           });
         } else {
           serial.getPorts().then((ports) => {
