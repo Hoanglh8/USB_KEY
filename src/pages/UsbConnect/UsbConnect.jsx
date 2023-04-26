@@ -1,7 +1,12 @@
 import { notification } from 'antd';
 import { generateKeyPair, sharedKey } from 'curve25519-js';
 import { useEffect, useRef, useState } from 'react';
-import { AES, enc } from 'crypto-js';
+var CryptoJS = require('crypto-js');
+var lastRememberSandId = -1;
+var deviceSerial = '';
+var isUsbAuthenticated = false;
+// import { AES, enc } from 'crypto-js';
+
 const serial = {};
 const Buffer = require('buffer/').Buffer;
 
@@ -14,7 +19,80 @@ serial.getPorts = function () {
 let BOB_PUB = null;
 
 let handshakeState = 0;
-let finalSharedKey = null; // TODO: đây chính là key để mã hóa aes128
+let finalSharedKeyStr = null; // TODO: đây chính là key để mã hóa aes256
+const aesIVindex = '1234567890123456'; // TODO : random string voi do dai 16 moi lan khoi dong
+
+const restartHandshakeStateMachine = () => {
+  handshakeState = 0;
+};
+
+export const encryptedUsbPayload = (data) => {
+  if (finalSharedKeyStr) {
+    let tmpKey = finalSharedKeyStr.slice(0, 16);
+    console.log('Share key: ' + tmpKey);
+    var encryptedData = CryptoJS.AES.encrypt(
+      CryptoJS.enc.Utf8.parse(data),
+      CryptoJS.enc.Utf8.parse(tmpKey),
+      {
+        // keySize: 128/8,
+        iv: CryptoJS.enc.Utf8.parse(aesIVindex),
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.Pkcs7,
+        // format: CryptoJS.format.base64
+      }
+    ).toString();
+
+    // decryptedUsbPayload(encryptedData); // test
+
+    encryptedData = '[' + encryptedData + ']';
+    return encryptedData;
+  }
+  return null;
+};
+
+export const decryptedUsbPayload = (data) => {
+  if (finalSharedKeyStr) {
+    let tmpKey = finalSharedKeyStr.slice(0, 16);
+    console.log(
+      'Share key: ' + tmpKey + ', data = ' + data + ', IV: ' + aesIVindex
+    );
+    var encryptedText = CryptoJS.enc.Base64.parse(data);
+    console.log('Hex string data: ' + encryptedText);
+
+    var decryptedTmp = CryptoJS.AES.decrypt(
+      data,
+      CryptoJS.enc.Utf8.parse(tmpKey),
+      {
+        // keySize: 128/8,
+        iv: CryptoJS.enc.Utf8.parse(aesIVindex),
+        mode: CryptoJS.mode.CBC,
+        padding: CryptoJS.pad.Pkcs7, // Pkcs7 // NoPadding
+      }
+    ).toString();
+
+    console.log('raw : ' + decryptedTmp);
+    var uint8array = Uint8Array.from(Buffer.from(decryptedTmp, 'hex'));
+    var finalData = new TextDecoder().decode(uint8array);
+    console.log('Final : ' + finalData);
+
+    deviceSerial = finalData.split(',')[0];
+    var rxSandId = finalData.split(',')[1];
+
+    isUsbAuthenticated = rxSandId.localeCompare(lastRememberSandId.toString())
+      ? false
+      : true;
+    console.log(rxSandId);
+
+    console.log('Serial : ' + deviceSerial);
+    console.log('Sand id is valid : ' + isUsbAuthenticated);
+
+    // TODO: sau khi đã kiểm tra xong valid usb & mac -> thì 3-5s sau cần thay đổi sand ID và gửi lại
+    // TODO : web test các case disconnect USB (rút ra cắm lại)
+
+    return finalData;
+  }
+  return null;
+};
 
 serial.requestPort = function () {
   const filters = [
@@ -45,6 +123,7 @@ serial.Port.prototype.connect = function () {
         readLoop();
       },
       (error) => {
+        restartHandshakeStateMachine();
         this.onReceiveError(error);
       }
     );
@@ -158,7 +237,7 @@ const UsbConnect = () => {
         }
 
         port.onReceive = (data) => {
-          const enc = new TextEncoder(); // always utf-8
+          const enc1 = new TextEncoder(); // always utf-8
           const textDecoder = new TextDecoder();
           let rx = textDecoder.decode(data);
 
@@ -176,25 +255,30 @@ const UsbConnect = () => {
             const alicePriv = Uint8Array.from(Buffer.from(alicePrivVal, 'hex'));
             const bobPub = Uint8Array.from(Buffer.from(BOB_PUB, 'hex'));
 
-            const finalSharedStr = Buffer.from(
+            finalSharedKeyStr = Buffer.from(
               sharedKey(alicePriv, bobPub)
             ).toString('hex');
-            // Final key
-            finalSharedKey = Uint8Array.from(
-              Buffer.from(finalSharedStr, 'hex')
-            );
 
             const replyToUsb = 'key=' + alicePubVal;
             // console.log('Reply to usb : ' + replyToUsb);
 
             port
-              ?.send(enc.encode(replyToUsb))
+              ?.send(enc1.encode(replyToUsb))
               .then((_) => {
                 setPha2Val(true);
               })
               .catch((e) => {
+                restartHandshakeStateMachine(); // Bat tay lai tu dau
                 console.log(e);
               });
+          } else if (handshakeState === 2) {
+            // HuyTV 2 = state da authen qua pha1
+            if (rx.startsWith('[', 0) && rx.endsWith(']')) {
+              // Remove header and footer
+              rx = rx.substring(1, rx.length - 1);
+              rx = decryptedUsbPayload(rx);
+              console.log('Decrypted ' + rx);
+            }
           }
 
           if (data.getInt8() === 13) {
@@ -254,7 +338,8 @@ const UsbConnect = () => {
 
       if (port) {
         setPortConnect(port);
-        port?.send(enc.encode('Hello')).catch((e) => {
+        var hello = 'Hello,iv=' + aesIVindex;
+        port?.send(enc.encode(hello)).catch((e) => {
           console.log(e);
         });
       } else {
@@ -311,20 +396,32 @@ const UsbConnect = () => {
     if (pha2Val) {
       setTimeout(() => {
         const sandId = Math.floor(1000 + Math.random() * 9000);
-        const encodedString = new Buffer(sandId.toString()).toString('base64');
-        const cipherTextHex = enc.Hex.stringify(enc.Utf8.parse(encodedString));
-        console.log(cipherTextHex);
+        // const encodedString = new Buffer(sandId.toString()).toString('base64');
+        // const cipherTextHex = enc.Hex.stringify(enc.Utf8.parse(encodedString));
+        // console.log(cipherTextHex);
+        //HuyTV
+        lastRememberSandId = sandId;
+        var sandMsg =
+          sandId.toString() +
+          ',' +
+          Math.floor(1000 + Math.random() * 9000).toString();
+        var payload = encryptedUsbPayload(sandMsg);
+        console.log(payload);
+
         const encForUsb = new TextEncoder(); // always utf-8
-        setPingPong(pingPong + 1);
+        // setPingPong(pingPong + 1);
         if (portConnect) {
-          portConnect?.send(encForUsb.encode(cipherTextHex)).catch((e) => {
+          portConnect?.send(encForUsb.encode(payload)).catch((e) => {
+            restartHandshakeStateMachine();
             console.log(e);
           });
         } else {
           serial.getPorts().then((ports) => {
             if (ports.length === 0) {
+              handshakeState = 0;
               statusRef.current.textContent = 'No device found.';
             } else {
+              restartHandshakeStateMachine();
               statusRef.current.textContent = 'Connecting...';
               // eslint-disable-next-line react-hooks/exhaustive-deps
               port = ports[0];
@@ -332,7 +429,7 @@ const UsbConnect = () => {
             }
           });
         }
-      }, 1000);
+      }, 2000);
     }
   }, [pingPong, pha2Val]);
 
