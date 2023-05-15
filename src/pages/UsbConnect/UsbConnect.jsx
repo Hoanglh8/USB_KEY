@@ -169,7 +169,10 @@ serial.Port.prototype.disconnect = function () {
       value: 0x00,
       index: this.interfaceNumber,
     })
-    .then(() => this.device_.close());
+    .then(() => this.device_.close())
+    .catch((e) => {
+      console.log(e);
+    });
 };
 
 serial.Port.prototype.send = function (data) {
@@ -187,6 +190,7 @@ const UsbConnect = () => {
   const [alicePubVal, setAlicePubVal] = useState(null);
 
   const [pingPong, setPingPong] = useState(0);
+  const [connectAgain, setConnectAgain] = useState(0);
   const [pha2Val, setPha2Val] = useState(false);
 
   const addLine = (linesId, text) => {
@@ -255,6 +259,7 @@ const UsbConnect = () => {
               ?.send(enc1.encode(replyToUsb))
               .then((_) => {
                 setPha2Val(true);
+                setPingPong(pingPong + 1);
               })
               .catch((e) => {
                 restartHandshakeStateMachine(); // Bat tay lai tu dau
@@ -330,19 +335,20 @@ const UsbConnect = () => {
           // console.log(e);
         });
       } else {
-        openNotification();
+        openNotification(
+          'Bạn chưa kết nối đến USB, Vui lòng kết nối với USB trước khi gửi tin.'
+        );
       }
     }
   };
 
   // Thông báo nếu chưa có connect
-  const openNotification = () => {
+  const openNotification = (description) => {
     notification.open({
       message: 'Thông báo',
-      description:
-        'Bạn chưa kết nối đến USB, Vui lòng kết nối với USB trước khi gửi tin.',
+      description: description,
       onClick: () => {
-        // console.log('Notification Clicked!');
+        console.log('Notification Clicked!');
       },
     });
   };
@@ -367,17 +373,31 @@ const UsbConnect = () => {
     setAlicePrivVal(ALICE_PRIV);
     setAlicePubVal(ALICE_PUB);
 
-    serial.getPorts().then((ports) => {
-      if (ports.length === 0) {
-        statusRef.current.textContent = 'No device found.';
-      } else {
-        statusRef.current.textContent = 'Connecting...';
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        port = ports[0];
-        connect();
-      }
-    });
-  }, []);
+    serial
+      .getPorts()
+      .then((ports) => {
+        if (ports.length === 0) {
+          statusRef.current.textContent = 'No device found.';
+          setConnectAgain(connectAgain + 1);
+        } else {
+          statusRef.current.textContent = 'Connecting...';
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+          port = ports[0];
+          connect();
+          if (ports[0]) {
+            const enc = new TextEncoder(); // always utf-8
+            setPortConnect(ports[0]);
+            var hello = 'Hello,iv=' + aesIVindex;
+            ports[0]?.send(enc.encode(hello)).catch((e) => {
+              // console.log(e);
+            });
+          }
+        }
+      })
+      .catch((e) => {
+        setConnectAgain(connectAgain + 1);
+      });
+  }, [connectAgain]);
 
   useEffect(() => {
     if (pha2Val) {
@@ -390,27 +410,21 @@ const UsbConnect = () => {
           ',' +
           Math.floor(1000 + Math.random() * 9000).toString();
         var payload = encryptedUsbPayload(sandMsg);
-
         const encForUsb = new TextEncoder(); // always utf-8
-        setPingPong(pingPong + 1);
         if (portConnect) {
-          portConnect?.send(encForUsb.encode(payload)).catch((e) => {
-            restartHandshakeStateMachine();
-            setPortConnect(null);
-          });
+          portConnect
+            ?.send(encForUsb.encode(payload))
+            .then((data) => {
+              setPingPong(pingPong + 1);
+            })
+            .catch((e) => {
+              openNotification(
+                'Kết nối USB của bạn bị gián đoạn, Vui lòng kiểm tra và kết nối lại để gửi tin.'
+              );
+              setPortConnect(null);
+            });
         } else {
-          serial.getPorts().then((ports) => {
-            if (ports.length === 0) {
-              handshakeState = 0;
-              statusRef.current.textContent = 'No device found.';
-            } else {
-              restartHandshakeStateMachine();
-              statusRef.current.textContent = 'Connecting...';
-              // eslint-disable-next-line react-hooks/exhaustive-deps
-              port = ports[0];
-              connect();
-            }
-          });
+          setConnectAgain(connectAgain + 1);
         }
       }, 2000);
     }
