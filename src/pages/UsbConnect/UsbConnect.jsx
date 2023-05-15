@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 var CryptoJS = require('crypto-js');
 var lastRememberSandId = -1;
 var deviceSerial = '';
-var isUsbAuthenticated = false;
+var usbAuthenTimeout = 0;
 // import { AES, enc } from 'crypto-js';
 
 const serial = {};
@@ -20,16 +20,28 @@ let BOB_PUB = null;
 
 let handshakeState = 0;
 let finalSharedKeyStr = null; // TODO: đây chính là key để mã hóa aes256
-const aesIVindex = '1234567890123456'; // TODO : random string voi do dai 16 moi lan khoi dong
+let aesIVindex = '1234567890123456'; // TODO : random string voi do dai 16 moi lan khoi dong
 
 const restartHandshakeStateMachine = () => {
   handshakeState = 0;
 };
 
+// Thông báo nếu chưa có connect
+const openNotification = (description) => {
+  notification.open({
+    message: 'Thông báo',
+    description: description,
+    onClick: () => {},
+    onClose: () => {
+      window.location.reload(true);
+    },
+  });
+};
+
 export const encryptedUsbPayload = (data) => {
   if (finalSharedKeyStr) {
     let tmpKey = finalSharedKeyStr.slice(0, 32);
-    var encryptedData = CryptoJS.AES.encrypt(
+    let encryptedData = CryptoJS.AES.encrypt(
       CryptoJS.enc.Utf8.parse(data),
       CryptoJS.enc.Utf8.parse(tmpKey),
       {
@@ -72,10 +84,16 @@ export const decryptedUsbPayload = (data) => {
     deviceSerial = finalData.split(',')[0];
     var rxSandId = finalData.split(',')[1];
 
-    isUsbAuthenticated = rxSandId.localeCompare(lastRememberSandId.toString())
-      ? false
-      : true;
-
+    if (rxSandId.localeCompare(lastRememberSandId.toString()) === 0) {
+      usbAuthenTimeout = 5;
+    } else {
+      // console.log('Invalid sandID ' + rxSandId);
+      usbAuthenTimeout -= 1;
+      if (usbAuthenTimeout <= 0) {
+        restartHandshakeStateMachine();
+        // console.log('Reset state machine');
+      }
+    }
     // TODO: sau khi đã kiểm tra xong valid usb & mac -> thì 3-5s sau cần thay đổi sand ID và gửi lại
     // TODO : web test các case disconnect USB (rút ra cắm lại)
 
@@ -86,11 +104,6 @@ export const decryptedUsbPayload = (data) => {
 
 serial.requestPort = function () {
   const filters = [
-    { vendorId: 0xcafe }, // TinyUSB
-    { vendorId: 0x239a }, // Adafruit
-    { vendorId: 0x2e8a }, // Raspberry Pi
-    { vendorId: 0x303a }, // Espressif
-    { vendorId: 0x2341 }, // Arduino
     { vendorId: 0x86c }, // Bytech
   ];
   return navigator.usb
@@ -113,8 +126,18 @@ serial.Port.prototype.connect = function () {
         readLoop();
       },
       (error) => {
+        // TODO reconnect device
+        // console.log('Restart handshake state machine');
+        usbAuthenTimeout = 0;
         restartHandshakeStateMachine();
+
+        // console.log('usbAuthenTimeout ' + usbAuthenTimeout);
+
+        this.disconnect();
         this.onReceiveError(error);
+        openNotification(
+          'Thông tin tới USB bị gián đoạn, vui lòng kết nối lại trước khi gửi tin'
+        );
       }
     );
   };
@@ -169,10 +192,7 @@ serial.Port.prototype.disconnect = function () {
       value: 0x00,
       index: this.interfaceNumber,
     })
-    .then(() => this.device_.close())
-    .catch((e) => {
-      console.log(e);
-    });
+    .then(() => this.device_.close());
 };
 
 serial.Port.prototype.send = function (data) {
@@ -190,7 +210,6 @@ const UsbConnect = () => {
   const [alicePubVal, setAlicePubVal] = useState(null);
 
   const [pingPong, setPingPong] = useState(0);
-  const [connectAgain, setConnectAgain] = useState(0);
   const [pha2Val, setPha2Val] = useState(false);
 
   const addLine = (linesId, text) => {
@@ -235,7 +254,7 @@ const UsbConnect = () => {
           const textDecoder = new TextDecoder();
           let rx = textDecoder.decode(data);
 
-          // TODO: chỗ này là do phần physic cho truyền tối đa 64 bytes 1 lần
+          // Phần này là do phần physic cho truyền tối đa 64 bytes 1 lần
           // Độ dài key > 64 -> truyền làm 2 lần
 
           if (rx.includes('Hi,key=')) {
@@ -258,8 +277,8 @@ const UsbConnect = () => {
             port
               ?.send(enc1.encode(replyToUsb))
               .then((_) => {
+                usbAuthenTimeout = 5;
                 setPha2Val(true);
-                setPingPong(pingPong + 1);
               })
               .catch((e) => {
                 restartHandshakeStateMachine(); // Bat tay lai tu dau
@@ -342,17 +361,6 @@ const UsbConnect = () => {
     }
   };
 
-  // Thông báo nếu chưa có connect
-  const openNotification = (description) => {
-    notification.open({
-      message: 'Thông báo',
-      description: description,
-      onClick: () => {
-        console.log('Notification Clicked!');
-      },
-    });
-  };
-
   function generateRandomBytes(length) {
     let result = '';
     const hexChars = '0123456789abcdef';
@@ -373,60 +381,61 @@ const UsbConnect = () => {
     setAlicePrivVal(ALICE_PRIV);
     setAlicePubVal(ALICE_PUB);
 
-    serial
-      .getPorts()
-      .then((ports) => {
-        if (ports.length === 0) {
-          statusRef.current.textContent = 'No device found.';
-          setConnectAgain(connectAgain + 1);
-        } else {
-          statusRef.current.textContent = 'Connecting...';
-          // eslint-disable-next-line react-hooks/exhaustive-deps
-          port = ports[0];
-          connect();
-          if (ports[0]) {
-            const enc = new TextEncoder(); // always utf-8
-            setPortConnect(ports[0]);
-            var hello = 'Hello,iv=' + aesIVindex;
-            ports[0]?.send(enc.encode(hello)).catch((e) => {
-              // console.log(e);
-            });
-          }
-        }
-      })
-      .catch((e) => {
-        setConnectAgain(connectAgain + 1);
-      });
-  }, [connectAgain]);
+    serial.getPorts().then((ports) => {
+      if (ports.length === 0) {
+        statusRef.current.textContent = 'No device found.';
+      } else {
+        statusRef.current.textContent = 'Connecting...';
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        port = ports[0];
+        connect();
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (pha2Val) {
       setTimeout(() => {
-        const sandId = Math.floor(1000 + Math.random() * 9000);
-        //HuyTV
-        lastRememberSandId = sandId;
-        var sandMsg =
-          sandId.toString() +
-          ',' +
-          Math.floor(1000 + Math.random() * 9000).toString();
-        var payload = encryptedUsbPayload(sandMsg);
-        const encForUsb = new TextEncoder(); // always utf-8
-        if (portConnect) {
-          portConnect
-            ?.send(encForUsb.encode(payload))
-            .then((data) => {
-              setPingPong(pingPong + 1);
-            })
-            .catch((e) => {
-              openNotification(
-                'Kết nối USB của bạn bị gián đoạn, Vui lòng kiểm tra và kết nối lại để gửi tin.'
-              );
+        if (handshakeState === 2) {
+          const sandId = Math.floor(1000 + Math.random() * 9000);
+          //HuyTV
+          lastRememberSandId = sandId;
+          // console.log('Send sand ID: ' + lastRememberSandId);
+          var sandMsg =
+            sandId.toString() +
+            ',' +
+            Math.floor(1000 + Math.random() * 9000).toString();
+          var payload = encryptedUsbPayload(sandMsg);
+
+          const encForUsb = new TextEncoder(); // always utf-8
+          setPingPong(pingPong + 1);
+          if (portConnect) {
+            portConnect?.send(encForUsb.encode(payload)).catch((e) => {
+              restartHandshakeStateMachine();
               setPortConnect(null);
             });
-        } else {
-          setConnectAgain(connectAgain + 1);
+          } else {
+            serial.getPorts().then((ports) => {
+              if (ports.length === 0) {
+                handshakeState = 0;
+                statusRef.current.textContent = 'No device found.';
+              } else {
+                restartHandshakeStateMachine();
+                statusRef.current.textContent = 'Connecting...';
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+                port = ports[0];
+                connect();
+              }
+            });
+          }
+
+          usbAuthenTimeout -= 1;
+          if (usbAuthenTimeout < 0) {
+            // console.log('USB disconnected');
+            restartHandshakeStateMachine();
+          }
         }
-      }, 2000);
+      }, 3000);
     }
   }, [pingPong, pha2Val]);
 
